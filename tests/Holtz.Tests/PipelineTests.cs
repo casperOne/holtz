@@ -42,10 +42,56 @@ public class PipelineUnitTests
         var (vtt, excluded) = Pipeline.Assemble([good, bad], "a.wav", plan, allowDegraded: false);
         Assert.Single(excluded);
         Assert.DoesNotContain("Looping line.", Vtt.Parse(vtt).Select(c => c.Text));
-        Assert.Contains("Clips excluded by the quality gate", vtt);
+        Assert.Contains("Excluded by the quality gate", vtt);
         var (degraded, none) = Pipeline.Assemble([good, bad], "a.wav", plan, allowDegraded: true);
         Assert.Empty(none);
         Assert.Contains("Looping line.", Vtt.Parse(degraded).Select(c => c.Text));
+    }
+
+    [Fact]
+    public void AStretchThatIsMostlyALoopIsLeftOutAndSaidSo()
+    {
+        var plan = Planner.Build(100, [], new PlanSettings());
+        var result = new ClipResult(plan.Clips[0]);
+        var loop = Enumerable.Range(0, 5).Select(i => Make.Cue(i * 10, "Words that were never spoken here.")).ToList();
+
+        Assert.Empty(Pipeline.AcceptStretch(loop, 0, 60, result, allowDegraded: false));
+        var (span, _) = Assert.Single(result.RejectedStretches);
+        Assert.Equal(new Span(0, 60), span);
+
+        result.Cues = [Make.Cue(61, "A real line after the bad stretch.", 0)];
+        var (vtt, excluded) = Pipeline.Assemble([result], "a.wav", plan, allowDegraded: false);
+        Assert.Contains("stretch 00:00-01:00 left out", Assert.Single(excluded));
+        Assert.Contains("A real line after the bad stretch.", Vtt.Parse(vtt).Select(c => c.Text));
+    }
+
+    [Fact]
+    public void ADegradedRunKeepsARejectedStretchAndSaysSo()
+    {
+        var plan = Planner.Build(100, [], new PlanSettings());
+        var result = new ClipResult(plan.Clips[0]);
+        var loop = Enumerable.Range(0, 5).Select(i => Make.Cue(i * 10, "Words that were never spoken here.")).ToList();
+        result.Cues = Pipeline.AcceptStretch(loop, 0, 60, result, allowDegraded: true);
+        var (vtt, excluded) = Pipeline.Assemble([result], "a.wav", plan, allowDegraded: true);
+        Assert.Empty(excluded);
+        Assert.Equal(5, Vtt.Parse(vtt).Count);
+        Assert.Contains("kept because degraded output was asked for", vtt);
+    }
+
+    [Fact]
+    public void ARepeatBesideGoodLinesKeepsTheGoodLinesAndIsFlagged()
+    {
+        var plan = Planner.Build(100, [], new PlanSettings());
+        var result = new ClipResult(plan.Clips[0]);
+        var stretch = Make.Conversation(25);
+        stretch.InsertRange(10, Enumerable.Range(0, 5).Select(i => Make.Cue(30 + i * 0.1, "So we would have that.")));
+        Assert.Equal(30, Pipeline.AcceptStretch(stretch, 0, 90, result, allowDegraded: false).Count);
+        Assert.Empty(result.RejectedStretches);
+
+        result.Cues = stretch;
+        result.SuspectLoops = Pipeline.DescribeLocalLoops(stretch);
+        var (vtt, _) = Pipeline.Assemble([result], "a.wav", plan, allowDegraded: false);
+        Assert.Contains("\"So we would have that.\" x5", Assert.Single(Vtt.SuspectNotes(vtt), l => l.Contains("x5")));
     }
 
     [Fact]
@@ -144,8 +190,28 @@ public sealed class PipelineEndToEndTests : IDisposable
         return size / (16000.0 * 2);
     }
 
-    private static void Serve(HttpListener listener, List<string> log)
+    /// <summary>First pass: five identical invented lines, then a loop at 30 s. Any re-cut comes back clean.</summary>
+    private static JsonObject RespondWithInventedOpening(double duration, bool diarize)
     {
+        var segments = new JsonArray();
+        if (duration > 190)
+        {
+            for (var i = 0; i < 5; i++)
+                segments.Add(new JsonObject { ["start"] = i * 5.0, ["end"] = i * 5.0 + 4, ["text"] = " Words that were never spoken here." });
+            for (var i = 0; i < 20; i++)
+                segments.Add(new JsonObject { ["start"] = 30 + i * 2.0, ["end"] = 31.5 + i * 2.0, ["text"] = " So this is the total.", ["speaker"] = 0 });
+        }
+        else
+        {
+            for (var k = 1; k * 3.0 + 2.5 <= duration; k++)
+                segments.Add(new JsonObject { ["start"] = k * 3.0, ["end"] = k * 3.0 + 2.4, ["text"] = $" Line {k} is a fine sentence.", ["speaker"] = k % 2 });
+        }
+        return new JsonObject { ["text"] = "", ["segments"] = segments };
+    }
+
+    private static void Serve(HttpListener listener, List<string> log, Func<double, bool, JsonObject>? respond = null)
+    {
+        respond ??= Respond;
         while (listener.IsListening)
         {
             HttpListenerContext context;
@@ -157,7 +223,7 @@ public sealed class PipelineEndToEndTests : IDisposable
             JsonNode reply = path switch
             {
                 "/ready" or "/health" => new JsonObject { ["status"] = "ready" },
-                VibeServer.TranscribePath => Respond(WavSeconds(body), Encoding.UTF8.GetString(body).Contains("name=\"diarize_model\"")),
+                VibeServer.TranscribePath => respond(WavSeconds(body), Encoding.UTF8.GetString(body).Contains("name=\"diarize_model\"")),
                 _ => new JsonObject { ["error"] = "nope" },
             };
             lock (log) log.Add(path);
@@ -166,6 +232,40 @@ public sealed class PipelineEndToEndTests : IDisposable
             context.Response.OutputStream.Write(bytes);
             context.Response.Close();
         }
+    }
+
+    [Fact]
+    public void AnInventedOpeningIsNotCarriedAcrossARecut()
+    {
+        if (Audio.Find("ffmpeg") is null || Audio.Find("ffprobe") is null) return;
+        var audio = Path.Combine(_dir, "talk.wav");
+        var (code, _, err) = Audio.RunTool(Audio.Find("ffmpeg")!, ["-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+            "aevalsrc='0.125*sin(2*PI*440*t)*between(t,0,200)':d=230:s=16000", "-ac", "1", audio]);
+        Assert.True(code == 0, err);
+
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        var log = new List<string>();
+        new Thread(() => Serve(listener, log, RespondWithInventedOpening)) { IsBackground = true }.Start();
+
+        var outDir = Path.Combine(_dir, "out");
+        Directory.CreateDirectory(outDir);
+        using var server = VibeServer.Attach($"http://127.0.0.1:{port}", "test");
+        var exit = Pipeline.Run(server, new RunOptions { Audio = audio, OutDir = outDir, Fields = new() { ["diarize_model"] = "diar.gguf" } });
+        listener.Stop();
+
+        Assert.Equal(4, exit);
+        var raw = File.ReadAllText(Path.Combine(outDir, "transcript.vtt"));
+        var cues = Vtt.Parse(raw);
+        Assert.DoesNotContain(cues, c => c.Text.Contains("never spoken"));
+        Assert.Contains(cues, c => c.Text.Contains("fine sentence"));
+        Assert.Contains("stretch 00:00-00:30 left out", raw);
+
+        var assembly = JsonNode.Parse(File.ReadAllText(Path.Combine(outDir, "transcript-assembly.json")))!;
+        var rejected = assembly["clips"]![0]!["rejected_stretches"]!.AsArray();
+        Assert.Equal(30.0, Assert.Single(rejected)!["stop"]!.GetValue<double>());
     }
 
     [Fact]

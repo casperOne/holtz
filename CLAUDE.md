@@ -38,7 +38,8 @@ dotnet run --no-cache plugins/holtz/skills/transcribe/scripts/transcribe.cs -- h
   never edited. `transcript.vtt` is derived and must stay reproducible from them plus
   `transcript-assembly.json`.
 - Speaker ids are namespaced (+100 per clip, +10 per re-cut) and never merged or inferred across clips.
-- Never clamp an over-running cue (drop it whole); never delete a suspect trailing cue (flag it).
+- Never clamp an over-running cue (drop it whole); never delete a suspect trailing cue or short
+  repeat (flag it). Only a stretch that is mostly a loop may be left out, and it must be reported.
 - Never average loudness across a recording; peaks for speech detection, never means.
 - The Google transcript is optional and never corrects Vibe's text. `normalize --fill` inserts it only
   into gaps, marked `~google`.

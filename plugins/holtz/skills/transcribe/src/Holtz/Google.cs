@@ -285,6 +285,10 @@ public static class GoogleCrossCheck
             if (failed || (warned && !allowDegraded))
                 windows.Add(new Window(Segments.AsDouble(clip["start"]) ?? 0, Segments.AsDouble(clip["stop"]) ?? 0,
                     $"clip {clip["index"]} excluded by the quality gate"));
+            if (allowDegraded) continue;
+            foreach (var rejected in clip["rejected_stretches"] as JsonArray ?? [])
+                windows.Add(new Window(Segments.AsDouble(rejected?["start"]) ?? 0, Segments.AsDouble(rejected?["stop"]) ?? 0,
+                    $"a stretch of clip {clip["index"]} the quality gate rejected"));
         }
         if (assembly["plan"] is JsonObject plan)
         {

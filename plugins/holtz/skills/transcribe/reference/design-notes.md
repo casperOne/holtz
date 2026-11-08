@@ -74,6 +74,28 @@ to condition on. Every attempt's raw response is kept. A clip still bad after th
 unless `--allow-degraded`. Splitting a stubborn window into two runs at the loop point has worked
 where two retries did not.
 
+**Each stretch kept across a re-cut is judged alone.** The phrase check is a share of the clip, so a
+long clip dilutes a bad minute: 60 s of invented Norwegian over near-silence (5 identical lines of 6)
+passed once it was joined to 275 good lines, at under 2%. Only a second engine exposed it. A stretch is
+now left out (raw response kept, listed in the VTT's NOTE and `rejected_stretches`, exit 4) when it is
+all silence tokens, or holds a loop and is at least half repeats. Replaying that recording's saved
+responses rejects those 6 cues and keeps the 196-cue stretch after them. A small repeat beside good
+lines does not cost the good lines; the next rule flags it.
+
+**Short loops are flagged, not rejected.** A line of >= 3 words recurring >= 3 times, each within 4
+lines of the last, is listed under `SUSPECT CUES`. These are too short for the gate (the cycle check
+needs 12 lines; real ones here ran 3–11 repeats, and healthy speech reaches 8). Over 30 real
+transcripts (8,704 lines) the rule hit 10 places, including every short loop Google Recorder's text
+contradicted in one recording. It cannot prove a line was not said, so it keeps the line. It flags
+loops, so a single fabricated cue does not trip it; the two rules below cover that case.
+
+**Set the language when it is known.** On auto-detect, whisper wrote Norwegian and Korean over
+near-silence in an English recording. Two full runs of that 30-minute recording, auto-detect vs.
+`language=en`: clips left out 3 vs. 1, short loops flagged 5 vs. 0, foreign-language text gone, and the
+share of Vibe's words Google corroborated rose from 73% to 82%. One recording, and whisper varies
+between runs, so treat it as strong evidence and not a guarantee. Sound effects in asterisks and
+stray silence tokens still appear over near-silence.
+
 **A cue cannot describe audio the clip never held.** A clip of 241.3 s returned a final cue ending
 28.1 s past it (exactly whisper's 30 s window), text "Thank you.". It is dropped whole, not clamped.
 0.5 s of overrun is tolerated as resampling.

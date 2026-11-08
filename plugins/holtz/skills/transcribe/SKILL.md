@@ -67,10 +67,14 @@ by you, from the quotes.
 
 Do not ask for a Google transcript. It is optional. Use it if the user mentions or provides one.
 
+Pass `--language CODE` whenever you know the recording's language from what the user said or from
+context. If you cannot tell, add that to the same question. Left to auto-detect, whisper has invented
+foreign-language text over near-silence (see design notes).
+
 ## Step 2: run
 
 ```bash
-dotnet run --no-cache "${CLAUDE_SKILL_DIR}/scripts/transcribe.cs" -- run "AUDIO" [--google "GOOGLE.txt"] [--people "..."] [--language en]
+dotnet run --no-cache "${CLAUDE_SKILL_DIR}/scripts/transcribe.cs" -- run "AUDIO" --language en [--google "GOOGLE.txt"] [--people "..."]
 ```
 
 - Output goes to `<audio name>_transcription/` beside the audio unless `--out DIR`.
@@ -83,12 +87,18 @@ dotnet run --no-cache "${CLAUDE_SKILL_DIR}/scripts/transcribe.cs" -- run "AUDIO"
 - `--prompt "names, jargon"` helps whisper spell names. `--param key=value` passes any other field
   vibe-server reads (see design notes).
 
-Exit codes: `0` clean; `2` error (read the message); `4` some clip stayed bad after automatic re-cuts,
-or nothing transcribed. On `4` the transcript is still written, and its NOTE lists what was left out.
+Exit codes: `0` clean; `2` error (read the message); `4` a clip, or a stretch of one, stayed bad after
+automatic re-cuts, or nothing transcribed. On `4` the transcript is still written, and its NOTE lists
+what was left out.
 
-### When a clip is excluded (exit 4)
+**A clean exit does not mean every line is real.** Read the `SUSPECT CUES` notes at the top of
+`transcript.vtt`: they list trailing lines and short repeats (`"..." x4`) that were kept but could be
+invented. Report them with their times. With a Google transcript, check them against `cross-check.md`.
 
-The gate already re-cut it twice. Next moves, in order:
+### When a clip or stretch is excluded (exit 4)
+
+The gate already re-cut it twice. A stretch is left out when it was mostly a loop; the rest of its
+clip is kept. Next moves, in order:
 
 1. Re-run just that window into a new folder; times stay on the recording's timeline:
    `run "AUDIO" --from 612 --to 1323 --out "AUDIO_DIR/recut_10-12_to_22-03"`.
