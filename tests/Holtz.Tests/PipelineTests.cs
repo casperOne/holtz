@@ -70,6 +70,18 @@ public class PipelineUnitTests
     }
 
     [Fact]
+    public void LoadedModelsAreSummarizedNotDumped()
+    {
+        var payload = JsonNode.Parse("""
+            {"object":"list","data":[{"id":"ggml-large-v3.bin","object":"model","owned_by":"local",
+              "capabilities":{"engine":"whisper","languages":["en","zh","de"],"streaming":true}}]}
+            """);
+        Assert.Equal("ggml-large-v3.bin (whisper)", VibeServer.DescribeModels(payload));
+        Assert.Equal("none", VibeServer.DescribeModels(JsonNode.Parse("""{"object":"list","data":[]}""")));
+        Assert.Null(VibeServer.DescribeModels(null));
+    }
+
+    [Fact]
     public async Task MultipartNamesAreQuoted()
     {
         var clip = Path.GetTempFileName();
