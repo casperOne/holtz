@@ -47,7 +47,7 @@ public static class Cli
           --pre-roll S (0.35)  --tail S (0.75)
 
         normalize options:
-          --title TEXT  --note TEXT (repeatable)  --fill VTT  --fill-min-gap S (10)  --strict  --allow-degraded
+          --title TEXT  --note TEXT (repeatable)  --fill VTT  --fill-min-gap S (10)  --turn-gap S (10)  --strict  --allow-degraded
 
         Exit codes: 0 ok, 1 not ready (probe), 2 error, 3 unmapped speakers (--strict), 4 transcript degraded.
         """;
@@ -367,7 +367,7 @@ public static class Cli
 
     private static int Normalize(Args args)
     {
-        Allow(args, "--speakers", "--title", "--note", "--fill", "--fill-min-gap", "--strict", "--allow-degraded");
+        Allow(args, "--speakers", "--title", "--note", "--fill", "--fill-min-gap", "--turn-gap", "--strict", "--allow-degraded");
         if (args.Positional.Count != 2) throw new TranscribeException("normalize takes INPUT (VTT or JSON) and OUTPUT (.txt).");
         var (input, output) = (args.Positional[0], args.Positional[1]);
         if (!File.Exists(input)) throw new TranscribeException($"No such transcript: {input}");
@@ -406,6 +406,7 @@ public static class Cli
             SourceSha256 = Fmt.FileSha256(input),
             FillSourceName = fillName,
             FilledCount = filled?.Count ?? 0,
+            TurnGap = args.Number("--turn-gap", Normalizer.DefaultTurnGap),
         }, filled);
         if (unmapped.Count > 0)
         {

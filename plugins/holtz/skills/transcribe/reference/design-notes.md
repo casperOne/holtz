@@ -119,6 +119,15 @@ transcript, `cross-check.md` says whether Google heard it.
 - There is no way to tell the engine about voices in advance: vibe-server has no enrollment and no
   speaker-count option (Sortformer handles up to 4 speakers, Vibe's newer Nemotron diarizer up to 8).
 
+## The readable transcript
+
+A line shows only its first time, so one speaker's cues are merged only across pauses under
+`--turn-gap` (10 s). Merging across any silence put one unlabeled line over nearly 10 minutes of a real
+recording (01:27 to 11:13), hiding when a suspect "Thank you." occurred, and dated a remark 25 s early
+across a clip boundary. Same-speaker pauses are short (median 0.3 s, 90th percentile 1.5 s); over seven
+real transcripts only 26 of 2,440 reached 10 s, the same value as `--fill-min-gap`. This is a deliberate
+change from the Python pipeline, whose output was otherwise byte-identical.
+
 ## The Vibe engine
 
 Facts from the Vibe source (github.com/thewh1teagle/vibe, read at main `da8c2ca`, 2026-10-30;
