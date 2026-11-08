@@ -169,6 +169,47 @@ public class QualityGateTests
     }
 
     [Fact]
+    public void LocalLoopsFindInterleavedRepeatsAcrossPunctuation()
+    {
+        var cues = Make.Conversation(6);
+        for (var i = 0; i < 6; i++)
+        {
+            cues.Add(Make.Cue(20 + i * 2, i % 2 == 0 ? "So I did nine miles." : "So I did nine miles"));
+            cues.Add(Make.Cue(21 + i * 2, "Okay."));
+        }
+        var (first, last, hits) = Assert.Single(QualityGate.LocalLoops(cues));
+        Assert.Equal((6, 16, 6), (first, last, hits));
+    }
+
+    [Theory]
+    [InlineData("Okay sure.", 6, 1)]                 // too short to count
+    [InlineData("A real line of words.", 2, 1)]      // not repeated enough
+    [InlineData("A real line of words.", 4, 6)]      // too far apart
+    public void LocalLoopsIgnoreOrdinaryRepetition(string line, int copies, int spacing)
+    {
+        var cues = new List<Cue>();
+        for (var i = 0; i < copies; i++)
+        {
+            cues.Add(Make.Cue(cues.Count * 2, line));
+            for (var k = 1; k < spacing; k++) cues.Add(Make.Cue(cues.Count * 2, $"Filler {i} number {k} right here."));
+        }
+        Assert.Empty(QualityGate.LocalLoops(cues));
+    }
+
+    [Fact]
+    public void ALoopOnlyFailsAStretchWhenItDominatesIt()
+    {
+        var loop = Enumerable.Range(0, 5).Select(i => Make.Cue(i * 10, "Words that were never spoken here.")).ToList();
+        Assert.NotEmpty(QualityGate.StretchFindings(loop));
+        Assert.NotEmpty(QualityGate.StretchFindings([Make.Cue(0, "Thank you.")]));
+
+        var diluted = Make.Conversation(25).Concat(loop).ToList();
+        Assert.Empty(QualityGate.StretchFindings(diluted));
+        // Short real backchannel: repeats, but no loop.
+        Assert.Empty(QualityGate.StretchFindings([Make.Cue(0, "Okay."), Make.Cue(2, "Yeah."), Make.Cue(4, "Okay."), Make.Cue(6, "Okay.")]));
+    }
+
+    [Fact]
     public void LowWordRateOverALongStretch()
     {
         var cues = new List<Cue> { Make.Cue(0, "Hello there."), Make.Cue(400, "Goodbye now.") };

@@ -37,6 +37,11 @@ public static class QualityGate
     public const int MinCycleLines = 12;
     // Share of lines repeating an earlier line: healthy 0.19-0.26, a looping pass 0.86.
     public const double MaxDuplicateFraction = 0.5;
+    // A short loop inside an otherwise good clip. Over 30 real transcripts (8,704 lines) these
+    // settings hit 10 places, including every short loop a second engine exposed in one recording.
+    public const int LocalLoopMinWords = 3;
+    public const int LocalLoopMaxGap = 4;
+    public const int LocalLoopMinHits = 3;
 
     private static string Key(Cue cue) => Fmt.Squash(cue.Text).ToLowerInvariant();
 
@@ -70,6 +75,43 @@ public static class QualityGate
         var members = texts.Skip(start).Take(p).ToHashSet();
         while (start > 0 && members.Contains(texts[start - 1])) { start--; lines++; }
         return (lines, start, p);
+    }
+
+    /// <summary>The checks that still mean something on one stretch of a clip. Share-of-clip checks are
+    /// diluted by a long clip (5 copies of a line in 275 is under 2%), so a stretch kept across a
+    /// re-cut is judged alone. Empty unless the stretch is nothing but silence tokens, or holds a
+    /// loop AND is mostly repeats: a small repeat beside good lines must not cost the good lines
+    /// (<see cref="LocalLoops"/> flags it instead).</summary>
+    public static List<Finding> StretchFindings(IReadOnlyList<Cue> stretch)
+    {
+        var findings = Findings(stretch);
+        var loop = findings.Any(f => f.Kind is "silence_hallucination" or "phrase_loop" or "cycle_loop");
+        var mostlyRepeats = findings.Any(f => f.Kind == "duplicate_share");
+        return findings.Any(f => f.Kind == "all_hallucination") || (loop && mostlyRepeats) ? findings : [];
+    }
+
+    /// <summary>Lines of at least <see cref="LocalLoopMinWords"/> words repeated at least
+    /// <see cref="LocalLoopMinHits"/> times, each within <see cref="LocalLoopMaxGap"/> lines of the
+    /// last: (first index, last index, repeats), in order. For flagging, never for rejecting: too
+    /// short for every gate check, and people do repeat themselves. Compared on letters and digits
+    /// only, so punctuation variants of one line count together.</summary>
+    public static List<(int First, int Last, int Hits)> LocalLoops(IReadOnlyList<Cue> cues)
+    {
+        var keys = cues.Select(c => new string(Fmt.Squash(c.Text).ToLowerInvariant()
+            .Where(ch => char.IsLetterOrDigit(ch) || ch == ' ').ToArray())).ToList();
+        var used = new HashSet<int>();
+        var loops = new List<(int, int, int)>();
+        for (var i = 0; i < keys.Count; i++)
+        {
+            if (used.Contains(i) || keys[i].Split(' ', StringSplitOptions.RemoveEmptyEntries).Length < LocalLoopMinWords) continue;
+            var hits = new List<int> { i };
+            for (var j = i + 1; j < keys.Count && j - hits[^1] <= LocalLoopMaxGap; j++)
+                if (keys[j] == keys[i]) hits.Add(j);
+            if (hits.Count < LocalLoopMinHits) continue;
+            used.UnionWith(hits);
+            loops.Add((i, hits[^1], hits.Count));
+        }
+        return loops;
     }
 
     /// <summary>Every check, keeping the window each one names. Most actionable first.</summary>

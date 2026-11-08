@@ -14,6 +14,8 @@ public sealed class ClipResult(Clip clip)
     public List<(double From, string Raw)> Attempts { get; } = [];
     public List<string> Invented { get; } = [];
     public List<string> Suspect { get; set; } = [];
+    public List<string> SuspectLoops { get; set; } = [];
+    public List<(Span Span, string Reason)> RejectedStretches { get; } = [];
 
     public JsonObject ToJson()
     {
@@ -28,6 +30,13 @@ public sealed class ClipResult(Clip clip)
         }).ToArray());
         json["dropped_cues_past_audio"] = new JsonArray(Invented.Select(w => (JsonNode)w).ToArray());
         json["suspect_cues_kept"] = new JsonArray(Suspect.Select(w => (JsonNode)w).ToArray());
+        json["suspect_loops_kept"] = new JsonArray(SuspectLoops.Select(w => (JsonNode)w).ToArray());
+        json["rejected_stretches"] = new JsonArray(RejectedStretches.Select(r => (JsonNode)new JsonObject
+        {
+            ["start"] = Math.Round(r.Span.Start, 3),
+            ["stop"] = Math.Round(r.Span.Stop, 3),
+            ["reason"] = r.Reason,
+        }).ToArray());
         json["error"] = Error;
         return json;
     }
@@ -150,10 +159,22 @@ public static class Pipeline
                 return result;
             }
 
-            var combined = kept.Concat(Shift(cues, windowStart, (attempt - 1) * RetryNamespace)).ToList();
+            var shifted = Shift(cues, windowStart, (attempt - 1) * RetryNamespace);
+            var combined = kept.Concat(shifted).ToList();
             var findings = QualityGate.Findings(combined);
             if (findings.Count == 0)
             {
+                if (attempt > 1)
+                {
+                    combined = kept.Concat(AcceptStretch(shifted, windowStart, clip.Stop, result, options.AllowDegraded)).ToList();
+                    if (combined.Count == 0)
+                    {
+                        result.Error = "every stretch of this clip was rejected: "
+                            + string.Join("; ", result.RejectedStretches.Select(r => r.Reason));
+                        Console.Error.WriteLine($"  FAILED: {result.Error}");
+                        return result;
+                    }
+                }
                 Finish(result, combined);
                 Console.WriteLine($"  ok: {combined.Count} cues"
                     + (attempt > 1 ? $" (recovered by re-cutting from {Fmt.Clock(windowStart)})" : ""));
@@ -174,7 +195,11 @@ public static class Pipeline
                 return result;
             }
 
-            kept = combined.Where(c => c.Start < boundary).ToList();
+            // What this attempt got before it lost its place is judged on its own, before it joins a
+            // long clip that would dilute it. A finding can also name a second inside earlier kept text.
+            var stretch = shifted.Where(c => c.Start < boundary).ToList();
+            kept = kept.Where(c => c.Start < boundary)
+                .Concat(AcceptStretch(stretch, windowStart, boundary, result, options.AllowDegraded)).ToList();
             windowStart = restart!.Value;
             Console.WriteLine($"  gate hit at {Fmt.Clock(boundary)}; re-cutting from {Fmt.Clock(windowStart)} "
                 + $"and retrying ({attempt}/{options.MaxRetries}) ...");
@@ -187,6 +212,32 @@ public static class Pipeline
         result.Cues = Shift(combined, 0, result.Clip.SpeakerOffset);
         result.Suspect = FlagTrailingFabrication(result.Cues);
         foreach (var line in result.Suspect) Console.Error.WriteLine($"  suspect, kept unverified: {line}");
+        result.SuspectLoops = DescribeLocalLoops(result.Cues);
+        foreach (var line in result.SuspectLoops) Console.Error.WriteLine($"  repeated, kept unverified: {line}");
+    }
+
+    /// <summary>Short repeats as readable lines, for flagging. Kept, not dropped: nothing here proves
+    /// the words were not said, and a fabrication left in is visible while a real line deleted is not.</summary>
+    public static List<string> DescribeLocalLoops(IReadOnlyList<Cue> cues)
+    {
+        var ordered = cues.OrderBy(c => c.Start).ThenBy(c => c.Stop).ToList();
+        return QualityGate.LocalLoops(ordered)
+            .Select(l => $"[{Fmt.Clock(ordered[l.First].Start)}-{Fmt.Clock(ordered[l.Last].Stop)}] \"{Fmt.Squash(ordered[l.First].Text)}\" x{l.Hits}")
+            .ToList();
+    }
+
+    /// <summary>Judge one attempt's stretch alone; return the cues to keep. A stretch that fails is
+    /// recorded and left out unless degraded output was asked for. The clip's raw response keeps it.
+    /// Measured: 60 s of invented text over near-silence, 5 identical lines, passed once it was
+    /// joined to the 275 good lines after it, because the phrase check is a share of the clip.</summary>
+    internal static List<Cue> AcceptStretch(List<Cue> stretch, double from, double to, ClipResult result, bool allowDegraded)
+    {
+        var findings = QualityGate.StretchFindings(stretch);
+        if (findings.Count == 0) return stretch;
+        var reason = string.Join("; ", findings.Select(f => f.Message));
+        result.RejectedStretches.Add((new Span(from, to), reason));
+        Console.Error.WriteLine($"  stretch {Fmt.Clock(from)}-{Fmt.Clock(to)} rejected: {reason}");
+        return allowDegraded ? stretch : [];
     }
 
     /// <summary>Merge the usable clips into one VTT on the recording's timeline. A clip the gate
@@ -233,8 +284,24 @@ public static class Pipeline
                 + "over the near-silence every clip ends in. It may equally be someone being\n"
                 + "polite, which is why it was kept rather than dropped:\n"
                 + string.Join('\n', suspect.Select(l => "  " + l)));
+        var loops = included.SelectMany(r => r.SuspectLoops).ToList();
+        if (loops.Count > 0)
+            notes.Add($"{Vtt.SuspectNotePrefix} — repeated lines, kept, but check them against the audio.\n"
+                + "Each line recurs within a few lines of itself, too briefly for the quality gate.\n"
+                + "That is how a short whisper loop looks. People also repeat themselves, so they stay:\n"
+                + string.Join('\n', loops.Select(l => "  " + l)));
+        foreach (var result in included)
+            foreach (var (span, reason) in result.RejectedStretches)
+            {
+                if (allowDegraded) continue;
+                excluded.Add($"clip {result.Clip.Index} ({result.Clip.Name}): stretch {Fmt.Clock(span.Start)}-{Fmt.Clock(span.Stop)} left out: {reason}");
+            }
+        var keptAnyway = allowDegraded ? included.SelectMany(r => r.RejectedStretches).ToList() : [];
+        if (keptAnyway.Count > 0)
+            notes.Add("Stretches the quality gate rejected, kept because degraded output was asked for:\n"
+                + string.Join('\n', keptAnyway.Select(k => $"  {Fmt.Clock(k.Span.Start)}-{Fmt.Clock(k.Span.Stop)}: {k.Reason}")));
         if (excluded.Count > 0)
-            notes.Add("Clips excluded by the quality gate:\n" + string.Join('\n', excluded.Select(e => "  " + e)));
+            notes.Add("Excluded by the quality gate (a whole clip, or one stretch of it):\n" + string.Join('\n', excluded.Select(e => "  " + e)));
 
         return (Vtt.Render(included.SelectMany(r => r.Cues), notes), excluded);
     }
@@ -394,7 +461,7 @@ public static class Pipeline
         if (excluded.Count > 0)
         {
             Console.Error.WriteLine();
-            Console.Error.WriteLine("Some clips were left out of the transcript:");
+            Console.Error.WriteLine("Some clips or stretches were left out of the transcript:");
             foreach (var item in excluded) Console.Error.WriteLine($"  {item}");
             Console.Error.WriteLine("Re-run just that window (run AUDIO --from SECONDS --to SECONDS --out OTHER_DIR), or pass "
                 + "--allow-degraded to include them anyway — and then say the transcript is degraded and where.");
