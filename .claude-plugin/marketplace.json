@@ -1,0 +1,16 @@
+{
+  "name": "holtz",
+  "owner": {
+    "name": "casperOne"
+  },
+  "metadata": {
+    "description": "Transcription of long recordings with a local Vibe engine, cut so whisper never starts on silence."
+  },
+  "plugins": [
+    {
+      "name": "holtz",
+      "source": "./plugins/holtz",
+      "description": "Transcribe long recordings with Vibe locally: measure the audio, cut it at its silences, transcribe clip by clip, catch and re-cut whisper loops, label speakers, and optionally cross-check against a Google Recorder transcript."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "holtz",
+  "description": "Transcribe long recordings with a local Vibe engine, cut so whisper never starts on silence. C# (.NET 10) tooling; no Python.",
+  "author": {
+    "name": "casperOne"
+  },
+  "repository": "https://github.com/casperOne/holtz",
+  "license": "Apache-2.0",
+  "keywords": ["transcription", "vibe", "whisper", "diarization", "webvtt", "dotnet"]
+}
