@@ -228,23 +228,23 @@ public static class Cli
     }
 
     /// <summary>Attach to --server-url / VIBE_SERVER_URL, or start our own vibe-server.</summary>
-    private static VibeServer OpenServer(Args args, string? model)
+    private static VibeServer OpenServer(Args args, string? model, string label = "server  ")
     {
         var url = args.Get("--server-url") ?? Environment.GetEnvironmentVariable("VIBE_SERVER_URL");
         if (url is not null)
         {
             var server = VibeServer.Attach(url, args.Get("--server-url") is null ? "VIBE_SERVER_URL" : "--server-url");
             server.CheckReachable();
-            Console.WriteLine($"server  attached to {server.Url} (from {server.Source}; it will be left running)");
+            Console.WriteLine($"{label}attached to {server.Url} (from {server.Source}; it will be left running)");
             return server;
         }
         var binary = VibeInstall.FindServer(args.Get("--vibe-server")) ?? throw new TranscribeException(
             "vibe-server was not found. Install Vibe (https://thewh1teagle.github.io/vibe/), or pass --vibe-server "
             + "PATH (Windows: %LOCALAPPDATA%\\vibe\\vibe-server.exe; older installs call it sona.exe), or set VIBE_SERVER_PATH. "
             + "To use a server that is already running, pass --server-url.");
-        Console.WriteLine($"server  starting {binary}" + (model is null ? "" : $" with {Path.GetFileName(model)}") + " ...");
+        Console.WriteLine($"{label}starting {binary}" + (model is null ? "" : $" with {Path.GetFileName(model)}") + " ...");
         var started = VibeServer.Start(binary, model, TimeSpan.FromSeconds(args.Number("--ready-timeout", 300)));
-        Console.WriteLine($"server  {started.Url} (vibe-server {started.Version ?? "?"}; stopped when this run ends)");
+        Console.WriteLine($"{label}{started.Url} (vibe-server {started.Version ?? "?"}; stopped when this run ends)");
         return started;
     }
 
@@ -286,11 +286,11 @@ public static class Cli
 
         try
         {
-            using var server = OpenServer(args, model);
+            using var server = OpenServer(args, model, "server    ");
             var (ready, detail) = server.Owned ? VibeServer.ParseReadiness(server.GetText(VibeServer.ReadyPath)) : server.EnsureModel(model);
             Console.WriteLine($"ready     {(ready ? "yes" : "NO — " + detail)}");
-            var models = Segments.TryParse(server.GetText("/v1/models"));
-            if (models is not null) Console.WriteLine($"loaded    {models.ToJsonString()}");
+            if (VibeServer.DescribeModels(Segments.TryParse(server.GetText("/v1/models"))) is { } loaded)
+                Console.WriteLine($"loaded    {loaded}");
             if (server.Owned) Console.WriteLine("stopping  the server this probe started");
             return ready ? 0 : 1;
         }

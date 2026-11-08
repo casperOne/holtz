@@ -309,6 +309,26 @@ public sealed class VibeServer : IDisposable
         return (true, text.Length > 200 ? text[..200] : text);
     }
 
+    /// <summary><c>/v1/models</c> in one line: each model's id and engine (<c>ggml-large-v3.bin
+    /// (whisper)</c>). The full answer lists every supported language and is not worth a screen.
+    /// An unfamiliar shape is shown raw, shortened, rather than hidden.</summary>
+    public static string? DescribeModels(JsonNode? payload)
+    {
+        if (payload is null) return null;
+        if (payload is JsonObject { } obj && obj["data"] is JsonArray data)
+        {
+            if (data.Count == 0) return "none";
+            return string.Join(", ", data.Select(entry =>
+            {
+                var id = Segments.AsString(entry?["id"]) ?? "?";
+                var engine = Segments.AsString(entry?["capabilities"]?["engine"]);
+                return engine is null ? id : $"{id} ({engine})";
+            }));
+        }
+        var raw = payload.ToJsonString();
+        return raw.Length > 200 ? raw[..200] + " ..." : raw;
+    }
+
     /// <summary>Make the server ready, loading <paramref name="modelPath"/> if it has none. A silent
     /// <c>/ready</c> with a healthy <c>/health</c> means busy (it holds the model lock for a whole
     /// transcription), and loading a model then would evict the one a running job is using.</summary>
