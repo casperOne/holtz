@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/plugins/" />
+  <Folder Name="/plugins/holtz/" />
+  <Folder Name="/plugins/holtz/skills/" />
+  <Folder Name="/plugins/holtz/skills/transcribe/" />
+  <Folder Name="/plugins/holtz/skills/transcribe/src/">
+    <Project Path="plugins/holtz/skills/transcribe/src/Holtz/Holtz.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Holtz.Tests/Holtz.Tests.csproj" />
+  </Folder>
+</Solution>

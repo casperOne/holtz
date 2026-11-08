@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The engine behind scripts/transcribe.cs. A class library, not an app: the script is the
+    entry point (a .NET 10 file-based app that pulls this in with #:project), so there is one
+    thing to run and nothing to install. No NuGet packages on purpose: everything here is
+    the base class library (Process, HttpClient, System.Text.Json, Regex, SHA256), so a
+    first run needs no network beyond what `dotnet` itself needs.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>Holtz</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Holtz.Tests" />
+  </ItemGroup>
+
+</Project>
