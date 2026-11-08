@@ -9,6 +9,8 @@ public static class Normalizer
     public const string UnlabeledLabel = "?";
     /// <summary>Marks a turn that came from the fill source (the Google transcript) rather than Vibe.</summary>
     public const string FillMarker = "~google";
+    /// <summary>A pause this long (seconds) starts a new line even for the same speaker.</summary>
+    public const double DefaultTurnGap = 10;
 
     public static Dictionary<int, string> ParseSpeakerMap(string raw)
     {
@@ -68,11 +70,15 @@ public static class Normalizer
         return fill.Where(f => gaps.Any(g => g.Start <= f.Start && f.Stop <= g.Stop)).ToList();
     }
 
+    /// <summary>Consecutive cues by one speaker become one turn, unless a pause of at least
+    /// <paramref name="turnGap"/> seconds separates them: a turn shows only its first time, so merging
+    /// across a long silence would hide when the later words were said.</summary>
     public static (List<(string Name, string Text, double Start)> Turns, SortedSet<int> Unmapped) BuildTurns(
-        IReadOnlyList<Cue> cues, IReadOnlyDictionary<int, string> mapping, ISet<Cue>? filled = null)
+        IReadOnlyList<Cue> cues, IReadOnlyDictionary<int, string> mapping, ISet<Cue>? filled = null, double turnGap = DefaultTurnGap)
     {
         var turns = new List<(string Name, string Text, double Start)>();
         var unmapped = new SortedSet<int>();
+        var heardUntil = 0.0;
         foreach (var cue in cues)
         {
             var (name, missing) = Resolve(cue, mapping);
@@ -80,8 +86,10 @@ public static class Normalizer
             if (filled?.Contains(cue) == true) name += " " + FillMarker;
             var text = Clean(cue.Text);
             if (text.Length == 0) continue;
-            if (turns.Count > 0 && turns[^1].Name == name) turns[^1] = (name, turns[^1].Text + " " + text, turns[^1].Start);
+            if (turns.Count > 0 && turns[^1].Name == name && cue.Start - heardUntil < turnGap)
+                turns[^1] = (name, turns[^1].Text + " " + text, turns[^1].Start);
             else turns.Add((name, text, cue.Start));
+            heardUntil = Math.Max(heardUntil, cue.Stop);
         }
         return (turns, unmapped);
     }
@@ -94,13 +102,14 @@ public static class Normalizer
         public string SourceSha256 { get; init; } = "";
         public string? FillSourceName { get; init; }
         public int FilledCount { get; init; }
+        public double TurnGap { get; init; } = DefaultTurnGap;
     }
 
     public static (string Text, SortedSet<int> Unmapped) Render(
         IReadOnlyList<Cue> cues, IReadOnlyDictionary<int, string> mapping, Options options, ISet<Cue>? filled = null)
     {
         var ordered = cues.OrderBy(c => c.Start).ToList();
-        var (turns, unmapped) = BuildTurns(ordered, mapping, filled);
+        var (turns, unmapped) = BuildTurns(ordered, mapping, filled, options.TurnGap);
         var duration = cues.Max(c => c.Stop);
         var header = new List<string>
         {

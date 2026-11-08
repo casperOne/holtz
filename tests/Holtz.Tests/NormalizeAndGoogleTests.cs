@@ -30,6 +30,18 @@ public class NormalizerTests
         Assert.Equal([7], unmapped);
     }
 
+    [Theory]
+    [InlineData(Normalizer.DefaultTurnGap, new[] { "[00:00 Ana] One. Two.", "[00:23 Ana] Three." })] // pauses of 9 s, then exactly 10 s
+    [InlineData(5.0, new[] { "[00:00 Ana] One.", "[00:11 Ana] Two.", "[00:23 Ana] Three." })]
+    [InlineData(30.0, new[] { "[00:00 Ana] One. Two. Three." })]
+    public void ALongPauseStartsANewLineSoEveryLineKeepsATrueTime(double turnGap, string[] expected)
+    {
+        var cues = new List<Cue> { Make.Cue(0, "One.", 1), Make.Cue(11, "Two.", 1), Make.Cue(23, "Three.", 1) };
+        var (text, _) = Normalizer.Render(cues, new Dictionary<int, string> { [1] = "Ana" },
+            new Normalizer.Options { SourceName = "t.vtt", SourceSha256 = new string('a', 64), TurnGap = turnGap });
+        Assert.Equal(expected, text.Split('\n').Where(l => l.StartsWith('[')));
+    }
+
     [Fact]
     public void FillOnlyGoesIntoGapsNeverOverWhatVibeTranscribed()
     {

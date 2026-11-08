@@ -132,7 +132,8 @@ Then:
 dotnet run --no-cache "${CLAUDE_SKILL_DIR}/scripts/transcribe.cs" -- normalize "OUT/transcript.vtt" "OUT/transcript.txt" --speakers "0=Ana,1=Ben,100=Ben,101=Ana" [--title "..."] [--note "..."]
 ```
 
-Output lines are `[MM:SS Name] text`, consecutive lines by one person merged. Unmapped ids render
+Output lines are `[MM:SS Name] text`, consecutive lines by one person merged unless a pause of 10 s or
+more separates them (`--turn-gap S`), so every line's time is true for its first words. Unmapped ids render
 `[Speaker N]`, unlabeled fragments `[?]`. A `SUSPECT CUES` note from the run is copied into the
 header. `normalize` re-runs the quality gate and refuses (exit 4) a transcript that looks like a
 transcription failure; `--allow-degraded` overrides it. `--strict` fails (exit 3) on unmapped ids.
