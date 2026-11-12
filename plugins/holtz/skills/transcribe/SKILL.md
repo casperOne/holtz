@@ -119,6 +119,14 @@ questions asked, and quotes spread across the clip. For each id:
 2. If an id's quotes mix two people, or it has one or two short cues, say so; do not force a name.
    Leaving it unmapped renders it `[Speaker N]`, which is honest.
 3. Do not infer tone or intent from the text to decide who someone is.
+4. **Check every named person has an id in each pass.** The diarization model has a fixed number of
+   speaker slots (Sortformer 4, Nemotron 8). The worksheet marks a pass that used them all
+   (`All N speaker slots used`). If such a pass has two ids for one person and a named person has
+   none, that person's lines are filed under the others: look for their content (addressed by name,
+   their topics) inside other ids' quotes. Re-run that stretch on its own, with `--from`/`--to` set at
+   turn boundaries (a line start in that pass's `transcript.txt` or a cue start in its VTT) so the
+   new piece replaces whole lines. Diarization starts fresh and usually gives the person an id. Tell
+   the user which stretch you re-ran and why. Re-runs are minutes; offer, do not skip.
 
 Then:
 - **Confirm mode (default):** show the user the proposed mapping as a table (id → name → 1–2 short
@@ -159,8 +167,9 @@ in one transcript or the other.
 
 ## Other commands
 
-- `worksheet "transcript.vtt" [--out FILE] [--people "..."]`: rebuild the speaker worksheet from any
-  transcript (e.g. a VTT exported by hand from the Vibe app).
+- `worksheet "transcript.vtt" [--out FILE] [--people "..."] [--speaker-slots N]`: rebuild the speaker
+  worksheet from any transcript (e.g. a VTT exported by hand from the Vibe app). The slot limit is read
+  from `transcript-assembly.json` beside the VTT; pass `--speaker-slots` when there is none.
 - `normalize` also reads a `verbose_json` response or Vibe's older JSON array.
 - `help`: every option.
 

@@ -318,7 +318,7 @@ public static class Pipeline
     /// <summary>Per clip, per id: how much they said, how often they asked, and quotes from across the
     /// clip. The evidence a speaker mapping is argued from. Cutting a recording multiplies the id
     /// spaces, so this collects all of them in one place and the confirmation stays one pass.</summary>
-    public static string SpeakerWorksheet(IEnumerable<(string Heading, List<Cue> Cues)> groups, IReadOnlyList<string> people)
+    public static string SpeakerWorksheet(IEnumerable<(string Heading, List<Cue> Cues)> groups, IReadOnlyList<string> people, int? slots = null)
     {
         var lines = new List<string>
         {
@@ -334,6 +334,14 @@ public static class Pipeline
             "lines is one of those: say so rather than forcing a name on it.",
             "",
         };
+        if (slots is { } max)
+        {
+            lines.Add($"The diarization model tracks at most {max} voices per pass (a clip, or a re-cut inside one).");
+            if (people.Count >= max)
+                lines.Add($"**{people.Count} people were named for {max} slots: if a pass splits anyone across two ids, "
+                    + "someone else gets no id of their own and their lines appear under other ids.**");
+            lines.Add("");
+        }
         if (people.Count > 0)
         {
             lines.Add("## Who is in this recording (given up front)");
@@ -346,6 +354,9 @@ public static class Pipeline
             lines.Add($"## {heading}");
             lines.Add("");
             if (cues.Count == 0) { lines.Add("_No cues._"); lines.Add(""); continue; }
+            if (slots is { } full)
+                foreach (var pass in Diarizer.FullPasses(cues, full))
+                    lines.AddRange([SlotsFullWarning(pass, full), ""]);
             foreach (var group in cues.GroupBy(c => c.Label ?? "(unlabeled)").OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 var said = group.ToList();
@@ -362,6 +373,14 @@ public static class Pipeline
         lines.AddRange(["Proposed mapping (fill in, then confirm):", "", "```", "--speakers \"\"", "```", ""]);
         return string.Join('\n', lines);
     }
+
+    /// <summary>What to tell the agent when a pass filled every speaker slot. Said in the worksheet
+    /// and on the console, because the agent reads one and the person watching reads the other.</summary>
+    public static string SlotsFullWarning(Diarizer.FullPass pass, int slots) =>
+        $"> **All {slots} speaker slots used** by ids {string.Join(", ", pass.Ids)} ({Fmt.Clock(pass.Start)}-{Fmt.Clock(pass.Stop)}). "
+        + "If two of these ids are one person and a named person has no id here, that person's lines are filed under "
+        + "the others. Re-run the stretch where they speak on its own (`run AUDIO --from S --to S --out DIR`), cut at "
+        + "turn boundaries, so diarization starts fresh with room for them.";
 
     /// <summary>Group an already-assembled VTT's cues back into clips by namespace, for a worksheet
     /// rebuilt from the transcript alone.</summary>
@@ -407,13 +426,18 @@ public static class Pipeline
         var transcriptPath = Path.Combine(options.OutDir, "transcript.vtt");
         Fmt.WriteText(transcriptPath, vtt);
 
+        var diarizeModel = options.Fields.GetValueOrDefault("diarize_model");
+        var slots = Diarizer.Slots(diarizeModel);
         var worksheetPath = Path.Combine(options.OutDir, "speaker-worksheet.md");
         Fmt.WriteText(worksheetPath, SpeakerWorksheet(
             results.Where(r => r.Cues.Count > 0).Select(r =>
                 ($"Clip {r.Clip.Index} — {Fmt.Clock(r.Clip.Start)}-{Fmt.Clock(r.Clip.Stop)}"
                  + (r.Warnings.Count > 0 || r.Error is not null ? " (EXCLUDED by the gate; ids shown for reference)" : ""),
                  r.Cues)),
-            options.People));
+            options.People, slots));
+        var fullPasses = slots is { } n
+            ? results.Where(r => r.Cues.Count > 0).SelectMany(r => Diarizer.FullPasses(r.Cues, n)).ToList()
+            : [];
 
         var assembly = new JsonObject
         {
@@ -438,6 +462,17 @@ public static class Pipeline
             ["request_fields"] = new JsonObject(new[] { KeyValuePair.Create("response_format", (JsonNode?)VibeServer.ResponseFormat) }
                 .Concat(options.Fields.Where(f => f.Key != "response_format").Select(f => KeyValuePair.Create(f.Key, (JsonNode?)f.Value)))),
             ["people"] = new JsonArray(options.People.Select(p => (JsonNode)p).ToArray()),
+            ["diarizer"] = diarizeModel is null ? null : new JsonObject
+            {
+                ["model"] = diarizeModel,
+                ["speaker_slots"] = slots,
+                ["passes_with_all_slots_used"] = new JsonArray(fullPasses.Select(p => (JsonNode)new JsonObject
+                {
+                    ["ids"] = new JsonArray(p.Ids.Select(id => (JsonNode)id).ToArray()),
+                    ["start"] = Math.Round(p.Start, 3),
+                    ["stop"] = Math.Round(p.Stop, 3),
+                }).ToArray()),
+            },
             ["plan"] = plan.ToJson(),
             ["clips"] = new JsonArray(results.Select(r => (JsonNode)r.ToJson()).ToArray()),
             ["excluded_from_transcript"] = new JsonArray(excluded.Select(e => (JsonNode)e).ToArray()),
@@ -456,6 +491,16 @@ public static class Pipeline
         {
             Console.WriteLine();
             GoogleCrossCheck.RunInto(options.GooglePath, transcriptPath, options.OutDir, assemblyPath);
+        }
+
+        if (slots is { } max && (fullPasses.Count > 0 || options.People.Count >= max))
+        {
+            Console.WriteLine();
+            if (options.People.Count >= max)
+                Console.WriteLine($"note: {options.People.Count} people named; the diarization model tracks at most {max} per pass.");
+            foreach (var pass in fullPasses)
+                Console.WriteLine($"note: ids {string.Join(", ", pass.Ids)} ({Fmt.Clock(pass.Start)}-{Fmt.Clock(pass.Stop)}) used all "
+                    + $"{max} speaker slots; check speaker-worksheet.md for a person with no id of their own.");
         }
 
         if (excluded.Count > 0)
