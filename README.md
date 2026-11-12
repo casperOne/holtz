@@ -77,6 +77,10 @@ The results go in an `interview_transcription` folder next to the recording:
 Speaker 1 in clip 1 and speaker 101 in clip 2 may or may not be the same person. That is why each
 number is named from its own quotes.
 
+**Speaker recognition can tell apart only so many voices at once** (4 with Vibe's default model).
+If a clip uses all of them, `speaker-worksheet.md` says so: one person may have been split in two and
+another folded into someone else. Re-running just that stretch usually fixes it.
+
 ## For developers
 
 - `Holtz.slnx`: open it in Visual Studio or Rider.

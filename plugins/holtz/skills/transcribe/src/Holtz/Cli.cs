@@ -18,7 +18,7 @@ public static class Cli
           holtz run       AUDIO [options]          measure, cut, transcribe, gate, assemble
           holtz normalize VTT OUT.txt --speakers "1=Ana,2=Ben,101=Ben" [--fill transcript_google.vtt]
           holtz google    GOOGLE.txt --vtt transcript.vtt [--out DIR]
-          holtz worksheet VTT [--out speaker-worksheet.md]
+          holtz worksheet VTT [--out speaker-worksheet.md] [--speaker-slots N]
 
         run options:
           --out DIR             where to write (default: <audio name>_transcription beside the audio)
@@ -45,6 +45,10 @@ public static class Cli
         detection options (profile, plan, run):
           --noise-db DB (-40)  --min-silence S (20)  --min-peak-db DB (-35)  --bridge-peak-db DB (-38)
           --pre-roll S (0.35)  --tail S (0.75)
+
+        worksheet options:
+          --people "TEXT"       repeatable, as for run
+          --speaker-slots N     the diarization model's speaker limit (default: read from transcript-assembly.json beside the VTT)
 
         normalize options:
           --title TEXT  --note TEXT (repeatable)  --fill VTT  --fill-min-gap S (10)  --turn-gap S (10)  --strict  --allow-degraded
@@ -434,10 +438,13 @@ public static class Cli
 
     private static int Worksheet(Args args)
     {
-        Allow(args, "--out", "--people");
+        Allow(args, "--out", "--people", "--speaker-slots");
         if (args.Positional.Count != 1) throw new TranscribeException("worksheet takes one transcript (VTT or JSON).");
         var cues = Vtt.Load(args.Positional[0]);
-        var text = Pipeline.SpeakerWorksheet(Pipeline.GroupByNamespace(cues), args.All("--people"));
+        int? slots = args.OptionalNumber("--speaker-slots") is { } given
+            ? (given >= 1 && given == Math.Floor(given) ? (int)given : throw new TranscribeException("--speaker-slots expects a whole number >= 1."))
+            : Diarizer.Slots(Diarizer.ModelFromAssembly(args.Positional[0]));
+        var text = Pipeline.SpeakerWorksheet(Pipeline.GroupByNamespace(cues), args.All("--people"), slots);
         if (args.Get("--out") is { } outPath) { Fmt.WriteText(outPath, text); Console.WriteLine($"wrote {outPath}"); }
         else Console.WriteLine(text);
         return 0;

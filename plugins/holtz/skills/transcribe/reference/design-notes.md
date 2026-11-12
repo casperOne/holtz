@@ -124,6 +124,16 @@ transcript, `cross-check.md` says whether Google heard it.
   opposite order from the other clips (ids 900 and 901 reversed): the same reversal the Python
   pipeline met between two cuts of one recording, now seen inside a single run. Mapping each clip's
   ids from that clip's own quotes is what kept it from mislabeling the whole clip.
+- **A pass that fills every slot can hide a person.** On a real 59-minute, four-person meeting with
+  Sortformer (4 slots), one 30-minute re-cut (10:13-38:40) used all four slots, two of them on one
+  person. The fourth person had no id; their lines (two stretches between 32:18 and 36:02) came out
+  under two other people's ids, and naming whole ids could not fix it. Re-running only 32:18-36:02 (cut
+  at turn boundaries) gave them their own id in the new pass. So the tool reads the slot count from the
+  model's file name (`Diarizer.Slots`: `Nspk`, or 8 for Nemotron), and the worksheet, the console and
+  `transcript-assembly.json` (`diarizer.passes_with_all_slots_used`) mark every pass (an id band of
+  10) that used all its slots, plus a run that named as many people as there are slots. A full pass is
+  not an error: four people in four slots is fine when nobody was split. It is a prompt to check
+  that every named person has an id there, which only the quotes can tell.
 
 ## The readable transcript
 
