@@ -70,6 +70,7 @@ The results go in an `interview_transcription` folder next to the recording:
 | File | What it is |
 |---|---|
 | `transcript.txt` | The readable transcript: `[MM:SS Name] text` |
+| `transcript_full.txt` | Only when you `join` several runs: the readable transcript from all of them |
 | `transcript.vtt` | The timed transcript with speaker numbers, plus notes on what was skipped or doubtful |
 | `speaker-worksheet.md` | What each speaker number said, used to name them |
 | `transcript-assembly.json` | How it was made: audio checksum, settings, every command |
@@ -83,6 +84,11 @@ number is named from its own quotes.
 **Speaker recognition can tell apart only so many voices at once** (4 with Vibe's default model).
 If a clip uses all of them, `speaker-worksheet.md` says so: one person may have been split in two and
 another folded into someone else. Re-running just that stretch usually fixes it.
+
+**When a recording takes more than one run** (a stretch re-run to fix a loop or a lost speaker),
+`join` puts the runs back together into one transcript, each named with its own speaker mapping. The
+later, narrower runs replace what the first run had for their stretch, and the header says which run
+each part of the timeline came from.
 
 ## For developers
 

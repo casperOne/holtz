@@ -51,7 +51,7 @@ engine, starts the engine, confirms it is ready, and stops it. Exit 0 means read
 | NO diarization model | In Vibe, turn on speaker recognition once so it downloads the model; or accept `--no-diarize` (every line becomes `[?]`) |
 
 This skill needs the machine that has Vibe and the audio. In a cloud session with neither, say so and
-work only on transcript files that are already present (`normalize`, `google`, `worksheet`).
+work only on transcript files that are already present (`normalize`, `join`, `google`, `worksheet`).
 
 ## Step 1: before running, ask about speakers (optional, one question)
 
@@ -103,7 +103,8 @@ clip is kept. Next moves, in order:
 1. Re-run just that window into a new folder; times stay on the recording's timeline:
    `run "AUDIO" --from 612 --to 1323 --out "AUDIO_DIR/recut_10-12_to_22-03"`.
    Splitting a long failing window at the second the gate names (two runs: `--from A --to LOOP` and
-   `--from LOOP --to B`) has recovered stretches that two automatic retries could not.
+   `--from LOOP --to B`) has recovered stretches that two automatic retries could not. Name each
+   run's speakers from its own worksheet, then put them together with `join` (Step 4).
 2. If a Google transcript exists, its text for that stretch is in `cross-check.md`, and
    `normalize --fill` can carry it into the readable transcript, marked `~google`.
 3. Only if the user accepts it: `--allow-degraded`, and say which parts are degraded.
@@ -126,7 +127,8 @@ questions asked, and quotes spread across the clip. For each id:
    their topics) inside other ids' quotes. Re-run that stretch on its own, with `--from`/`--to` set at
    turn boundaries (a line start in that pass's `transcript.txt` or a cue start in its VTT) so the
    new piece replaces whole lines. Diarization starts fresh and usually gives the person an id. Tell
-   the user which stretch you re-ran and why. Re-runs are minutes; offer, do not skip.
+   the user which stretch you re-ran and why. Re-runs are minutes; offer, do not skip. The re-run is
+   a later `--part` of `join` (Step 4).
 
 Then:
 - **Confirm mode (default):** show the user the proposed mapping as a table (id → name → 1–2 short
@@ -145,6 +147,29 @@ more separates them (`--turn-gap S`), so every line's time is true for its first
 `[Speaker N]`, unlabeled fragments `[?]`. A `SUSPECT CUES` note from the run is copied into the
 header. `normalize` re-runs the quality gate and refuses (exit 4) a transcript that looks like a
 transcription failure; `--allow-degraded` overrides it. `--strict` fails (exit 3) on unmapped ids.
+
+### Several runs of one recording: `join`
+
+When the recording was transcribed in more than one run (windows re-run after an excluded clip, a
+stretch re-run for a lost speaker, a quiet stretch re-run with a lower `--min-peak-db`), never stitch
+text by hand. Map each run's ids from its own worksheet, then:
+
+```bash
+dotnet run --no-cache "${CLAUDE_SKILL_DIR}/scripts/transcribe.cs" -- join "OUT/transcript_full.txt" \
+  --part "OUT" --speakers "1=Nick,3=Eli" \
+  --part "OUT/recut_08-44_to_38-40" --speakers "0=Eli,10=Eli,11=Nick" \
+  --part "OUT/recut_32-18_to_36-02" --speakers "0=Nick,1=Eli,2=Vahram" [--title "..."] [--note "..."]
+```
+
+- **Order matters: widest first.** Each later `--part` replaces the earlier ones inside its window
+  (read from that run's `transcript-assembly.json`). A line belongs to the part whose window holds its
+  start, so a window cut mid-turn leaves the turn's opening with the earlier part.
+- One `--speakers` per `--part`, same order. Ids never cross parts; each is named by its own map.
+- The header lists every part (sha256, window, mapping), which part covers which minutes, every
+  stretch still not transcribed, unmapped ids per part, and each part's `SUSPECT CUES`.
+- Each part is gated like `normalize` (exit 4 refuses a looping part; `--allow-degraded`). Exit 4 also
+  when a stretch the gate left out is covered by no later part; the file is still written and the
+  header says `NOT TRANSCRIBED` with times. Skipped silences are listed, not failures.
 
 ## Optional: a Google Recorder transcript
 
@@ -182,6 +207,7 @@ in one transcript or the other.
 | `transcript-assembly.json` | Provenance: audio SHA-256, server and model, request fields, the plan, every ffmpeg command, each clip's attempts and gate result. |
 | `speaker-worksheet.md` | Per-id stats and quotes for naming speakers. |
 | `transcript.txt` | Written by `normalize`: the readable transcript with names. |
+| `transcript_full.txt` (any name) | Written by `join` when the recording took several runs: one readable transcript from all of them. |
 | `<google file>`, `transcript_google.vtt`, `cross-check.md` | Only when a Google transcript was given. |
 
 ## Reporting back

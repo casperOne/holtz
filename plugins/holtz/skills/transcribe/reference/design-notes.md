@@ -169,6 +169,30 @@ release v3.3.0 ships `server-v0.6.10`). Re-check when Vibe changes.
 - Multipart field names are sent quoted (`name="file"`). .NET's default is unquoted, which RFC 7578
   allows and not every parser accepts.
 
+## Joining runs (`join`)
+
+A real 59-minute meeting needed six runs before it was complete: the full run (its 50-minute second
+clip excluded for a loop), three windows split at the loops, a 27-second stretch the plan had skipped
+as silence (quiet real speech, peak -39.2 dBFS, recovered with `--min-peak-db -50`), and a 3:45 re-run
+that gave a lost speaker an id. They were joined by hand the first time. `join` does the same thing
+deterministically, and on that meeting it reproduced the hand-joined transcript word for word (10,523
+words, same speaker order). It differs only where a section boundary fell mid-turn: `join` merges the
+two halves of one person's turn, because it builds turns once over the whole timeline.
+
+- **Precedence is the order given**, not window size: explicit, and the agent controls it. Each part
+  replaces earlier parts inside its window `[from, to)`, read from `plan.settings` in its
+  `transcript-assembly.json` (no record: the span of its cues, said in the header).
+- **A cue belongs to the part whose window holds its start**, the rule a turn's time already
+  follows. Clipping or splitting cues would edit evidence; so windows should be cut at turn
+  boundaries, and a turn that starts just before one stays whole with the earlier part.
+- **Ids become names per part before merging** (as `Voice`), so ids from different diarization passes
+  never meet. Unmapped ids stay `[Speaker N]` and the header says which part they came from.
+- **Gaps are reported only where no later part fills them.** A clip excluded by the gate or a rejected
+  stretch is a failure (`NOT TRANSCRIBED`, exit 4, file still written, as `run` does); a skipped
+  silence or too-quiet stretch is listed, not a failure. Overlaps under 1 s are not reported: a
+  window cut at a silence's edge overlaps it by the 0.35 s pre-roll.
+- Each part is gated alone, like `normalize`: a loop in one run is that run's.
+
 ## The Google cross-check
 
 - Google Recorder exports plain text: paragraphs, no timings, speaker labels only in some versions

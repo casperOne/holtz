@@ -17,6 +17,7 @@ public static class Cli
           holtz plan      AUDIO [--json]           the cut plan, without transcribing
           holtz run       AUDIO [options]          measure, cut, transcribe, gate, assemble
           holtz normalize VTT OUT.txt --speakers "1=Ana,2=Ben,101=Ben" [--fill transcript_google.vtt]
+          holtz join      OUT.txt --part RUN_DIR --speakers "0=Ana,1=Ben" [--part RUN_DIR --speakers "..."]...
           holtz google    GOOGLE.txt --vtt transcript.vtt [--out DIR]
           holtz worksheet VTT [--out speaker-worksheet.md] [--speaker-slots N]
 
@@ -53,17 +54,25 @@ public static class Cli
         normalize options:
           --title TEXT  --note TEXT (repeatable)  --fill VTT  --fill-min-gap S (10)  --turn-gap S (10)  --strict  --allow-degraded
 
-        Exit codes: 0 ok, 1 not ready (probe), 2 error, 3 unmapped speakers (--strict), 4 transcript degraded.
+        join options (several runs of one recording, e.g. a full run and windows re-run with --from/--to):
+          --part PATH           a run folder or its transcript.vtt; repeatable, widest first: each later part
+                                replaces the earlier ones inside its window
+          --speakers MAP        that part's own mapping; one per --part, in the same order
+          --title TEXT  --note TEXT (repeatable)  --turn-gap S (10)  --strict  --allow-degraded
+
+        Exit codes: 0 ok, 1 not ready (probe), 2 error, 3 unmapped speakers (--strict), 4 transcript degraded
+        (join: also when a stretch the gate left out is not covered by a later part; the file is still written).
         """;
 
-    private static readonly HashSet<string> Commands = ["probe", "profile", "plan", "run", "normalize", "google", "worksheet", "help"];
+    private static readonly HashSet<string> Commands = ["probe", "profile", "plan", "run", "normalize", "join", "google", "worksheet", "help"];
 
     private static readonly HashSet<string> Flags =
     [
         "--json", "--no-diarize", "--allow-degraded", "--keep-clip-audio", "--force", "--strict", "--help", "-h",
     ];
 
-    private static readonly HashSet<string> Repeatable = ["--param", "--people", "--note"];
+    // --speakers repeats only for join (one per --part); every other command reads the last one given.
+    private static readonly HashSet<string> Repeatable = ["--param", "--people", "--note", "--part", "--speakers"];
 
     private sealed class Args
     {
@@ -153,6 +162,7 @@ public static class Cli
                 "plan" => PlanCommand(args),
                 "run" => RunCommand(args),
                 "normalize" => Normalize(args),
+                "join" => Join(args),
                 "google" => GoogleCommand(args),
                 "worksheet" => Worksheet(args),
                 _ => 2,
@@ -421,6 +431,61 @@ public static class Cli
         Fmt.WriteText(output, text);
         Console.WriteLine($"wrote {output} ({text.Count(c => c == '\n')} lines"
             + (filled is { Count: > 0 } ? $", {filled.Count} passage(s) filled from {fillName}" : "") + ").");
+        return 0;
+    }
+
+    private static int Join(Args args)
+    {
+        Allow(args, "--part", "--speakers", "--title", "--note", "--turn-gap", "--strict", "--allow-degraded");
+        if (args.Positional.Count != 1) throw new TranscribeException("join takes one OUTPUT (.txt), then --part/--speakers pairs.");
+        var output = args.Positional[0];
+        var paths = args.All("--part");
+        var maps = args.All("--speakers");
+        if (paths.Count == 0) throw new TranscribeException("join needs at least one --part.");
+        if (maps.Count != paths.Count)
+            throw new TranscribeException($"join needs one --speakers per --part, in the same order ({paths.Count} --part, {maps.Count} --speakers).");
+        var outDir = Path.GetDirectoryName(Path.GetFullPath(output))!;
+        var root = Joiner.CommonFolder(paths.Select(p => Directory.Exists(p) ? p : Path.GetDirectoryName(Path.GetFullPath(p))!));
+        var parts = paths.Select((p, i) => Joiner.Load(p, Normalizer.ParseSpeakerMap(maps[i]), root)).ToList();
+
+        // Each part is gated alone, as normalize gates one transcript: a loop in one run is that run's.
+        var degraded = false;
+        for (var i = 0; i < parts.Count; i++)
+            foreach (var warning in QualityGate.Assess(parts[i].Cues))
+            {
+                Console.Error.WriteLine($"warning: part {i + 1} ({parts[i].Name}): {warning}");
+                degraded = true;
+            }
+        if (degraded && !args.Has("--allow-degraded"))
+        {
+            Console.Error.WriteLine("error: refusing to join a part that looks like a transcription failure. Re-transcribe that "
+                + "window, or pass --allow-degraded to keep it anyway (and say so wherever it is used).");
+            return 4;
+        }
+
+        var result = Joiner.Merge(parts);
+        if (result.Unmapped.Count > 0)
+        {
+            Console.Error.WriteLine("warning: unmapped speaker id(s) rendered as [Speaker N]: "
+                + string.Join(", ", result.Unmapped.Select(u => $"part {u.Part + 1} id {u.Id}")) + ".");
+            if (args.Has("--strict")) return 3;
+        }
+        var text = Joiner.Render(result, parts, args.Get("--title"), args.All("--note"), args.Number("--turn-gap", Normalizer.DefaultTurnGap));
+        Directory.CreateDirectory(outDir);
+        Fmt.WriteText(output, text);
+        Console.WriteLine($"wrote {output} ({text.Count(c => c == '\n')} lines from {parts.Count} parts).");
+        foreach (var (span, part) in result.Coverage)
+            Console.WriteLine($"  {Fmt.Time(span.Start)}-{Fmt.Time(span.Stop)}  part {part + 1}  {parts[part].Name}");
+
+        var gaps = result.Missing.Where(m => m.Failure).ToList();
+        if (gaps.Count > 0 && !args.Has("--allow-degraded"))
+        {
+            Console.Error.WriteLine("Stretches the quality gate left out and no later part covers:");
+            foreach (var (span, why, _, part) in gaps)
+                Console.Error.WriteLine($"  {Fmt.Time(span.Start)}-{Fmt.Time(span.Stop)} (part {part + 1}: {why})");
+            Console.Error.WriteLine("Re-run that window (run AUDIO --from S --to S --out DIR) and add it as a later --part.");
+            return 4;
+        }
         return 0;
     }
 
