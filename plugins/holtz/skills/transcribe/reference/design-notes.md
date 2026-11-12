@@ -118,6 +118,12 @@ transcript, `cross-check.md` says whether Google heard it.
   openings are all one person setting up.
 - There is no way to tell the engine about voices in advance: vibe-server has no enrollment and no
   speaker-count option (Sortformer handles up to 4 speakers, Vibe's newer Nemotron diarizer up to 8).
+- **Verified end to end on a real run (2026-11-08).** A 30-minute two-person recording, Windows,
+  `sona.exe` v0.6.1, `ggml-large-v3`, `--language en`. The worksheet alone was enough to name every
+  id, and someone who was in the recording confirmed the names. Clip 10 numbered the two people in the
+  opposite order from the other clips (ids 900 and 901 reversed): the same reversal the Python
+  pipeline met between two cuts of one recording, now seen inside a single run. Mapping each clip's
+  ids from that clip's own quotes is what kept it from mislabeling the whole clip.
 - **A pass that fills every slot can hide a person.** On a real 59-minute, four-person meeting with
   Sortformer (4 slots), one 30-minute re-cut (10:13-38:40) used all four slots, two of them on one
   person. The fourth person had no id; their lines (two stretches between 32:18 and 36:02) came out
