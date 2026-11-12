@@ -39,9 +39,6 @@ In Claude Code:
 /plugin install holtz@holtz
 ```
 
-The repository is private, so git on that machine must be able to read it. For example, run
-`gh auth login` and then `gh auth setup-git`.
-
 To get updates later, run `/plugin marketplace update holtz`.
 
 **Without the plugin system:** copy `plugins/holtz/skills/transcribe` to
